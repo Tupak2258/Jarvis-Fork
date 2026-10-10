@@ -1,220 +1,117 @@
 """
-Модуль синтеза речи (Text-to-Speech)
+Модуль синтеза речи (Text-to-Speech).
+Работает по принципу "свежий движок на каждую фразу" — только так
+pyttsx3 стабильно работает с SAPI5 на Windows.
 """
 
 import pyttsx3
 import logging
-import threading
-from typing import Optional
+import re
 from config import TTS_RATE, TTS_VOICE_ID
 
 
+def _clean_for_tts(text: str) -> str:
+    """Чистит текст от markdown, эмодзи и мусора перед озвучкой."""
+    if not text:
+        return ""
+    text = re.sub(r"```.*?```", " (код пропущен) ", text, flags=re.S)
+    text = re.sub(r"`([^`]*)`", r"\1", text)
+    text = re.sub(r"[*_#>]+", "", text)
+    text = re.sub(r"\[(.*?)\]\(.*?\)", r"\1", text)
+    text = re.sub(r"[\U00010000-\U0010ffff]", "", text)  # эмодзи
+    text = re.sub(r"<[^>]+>", "", text)                   # xml-теги
+    text = re.sub(r"\s+", " ", text).strip()
+    return text[:1500]
+
+
 class TextToSpeech:
-    """Класс для синтеза речи"""
-    
+    """Простой TTS: свежий движок на каждую фразу."""
+
     def __init__(self):
-        self.engine = None
         self.logger = logging.getLogger(__name__)
         self.is_speaking = False
-        self._initialize_engine()
-    
-    def _initialize_engine(self):
-        """Инициализация TTS движка"""
-        try:
-            self.engine = pyttsx3.init()
-            
-            # Настройка голоса
-            voices = self.engine.getProperty('voices')
-            if voices and len(voices) > TTS_VOICE_ID:
-                self.engine.setProperty('voice', voices[TTS_VOICE_ID].id)
-                self.logger.info(f"Установлен голос: {voices[TTS_VOICE_ID].name}")
-            
-            # Настройка скорости речи
-            self.engine.setProperty('rate', TTS_RATE)
-            
-            # Настройка громкости (0.0 до 1.0)
-            self.engine.setProperty('volume', 0.8)
-            
-            self.logger.info("TTS движок инициализирован")
-            
-        except Exception as e:
-            self.logger.error(f"Ошибка инициализации TTS: {e}")
-            self.engine = None
-    
+        self._last_volume = 0.8
+        self._last_rate = TTS_RATE
+        self._muted = False
+        self.logger.info("TTS готов (режим: свежий движок на фразу)")
+
+    def _make_engine(self):
+        engine = pyttsx3.init()
+        voices = engine.getProperty("voices")
+        if voices and len(voices) > TTS_VOICE_ID:
+            engine.setProperty("voice", voices[TTS_VOICE_ID].id)
+        engine.setProperty("rate", self._last_rate)
+        engine.setProperty("volume", 0.0 if self._muted else self._last_volume)
+        return engine
+
     def speak(self, text: str, blocking: bool = True):
-        """
-        Произносит текст
-        
-        Args:
-            text: Текст для произношения
-            blocking: Блокировать ли выполнение до завершения речи
-        """
-        if not self.engine:
-            self.logger.error("TTS движок не инициализирован")
+        """Произносит текст. Параметр blocking игнорируется — всегда синхронно."""
+        text = _clean_for_tts(text)
+        if not text:
             return
-        
-        if not text or not text.strip():
-            return
-        
-        # Остановка предыдущего произношения если есть
-        if self.is_speaking:
-            self.stop_speaking()
-        
+
+        self.is_speaking = True
+        self.logger.info(f"Произношу: {text[:50]}...")
         try:
-            self.is_speaking = True
-            self.logger.info(f"Произношу: {text[:50]}...")
-            
-            if blocking:
-                self.engine.say(text)
-                self.engine.runAndWait()
-                self.is_speaking = False
-            else:
-                # Асинхронное произношение с лучшим управлением потоками
-                def speak_async():
-                    try:
-                        self.engine.say(text)
-                        self.engine.runAndWait()
-                    except Exception as e:
-                        self.logger.error(f"Ошибка в асинхронном произношении: {e}")
-                    finally:
-                        self.is_speaking = False
-                
-                thread = threading.Thread(target=speak_async, name="TTS-Thread")
-                thread.daemon = True
-                thread.start()
-                
+            engine = self._make_engine()
+            engine.say(text)
+            engine.runAndWait()
+            engine.stop()
+            del engine
         except Exception as e:
-            self.logger.error(f"Ошибка произношения: {e}")
+            self.logger.error(f"Ошибка произношения: {type(e).__name__}: {e}")
+        finally:
             self.is_speaking = False
-    
+
     def speak_async(self, text: str):
-        """Асинхронное произношение текста"""
-        self.speak(text, blocking=False)
-    
+        """Совместимость со старым API."""
+        self.speak(text)
+
     def stop_speaking(self):
-        """Останавливает текущее произношение"""
-        if self.engine and self.is_speaking:
-            try:
-                self.engine.stop()
-                self.is_speaking = False
-                self.logger.info("Произношение остановлено")
-            except Exception as e:
-                self.logger.error(f"Ошибка остановки произношения: {e}")
-    
+        self.is_speaking = False
+
     def is_busy(self) -> bool:
-        """Проверяет, произносится ли сейчас речь"""
         return self.is_speaking
-    
+
     def set_rate(self, rate: int):
-        """
-        Устанавливает скорость речи
-        
-        Args:
-            rate: Скорость (обычно 150-300)
-        """
-        if self.engine:
-            try:
-                self.engine.setProperty('rate', rate)
-                self.logger.info(f"Скорость речи установлена: {rate}")
-            except Exception as e:
-                self.logger.error(f"Ошибка установки скорости: {e}")
-    
+        self._last_rate = rate
+        self.logger.info(f"Скорость речи: {rate}")
+
     def set_volume(self, volume: float):
-        """
-        Устанавливает громкость речи
-        
-        Args:
-            volume: Громкость от 0.0 до 1.0
-        """
-        if self.engine:
-            try:
-                volume = max(0.0, min(1.0, volume))  # Ограничиваем диапазон
-                self.engine.setProperty('volume', volume)
-                self.logger.info(f"Громкость установлена: {volume}")
-            except Exception as e:
-                self.logger.error(f"Ошибка установки громкости: {e}")
-    
+        self._last_volume = max(0.0, min(1.0, volume))
+        self.logger.info(f"Громкость: {self._last_volume}")
+
     def get_voices(self) -> list:
-        """Получает список доступных голосов"""
-        if not self.engine:
-            return []
-        
         try:
-            voices = self.engine.getProperty('voices')
-            voice_list = []
-            
-            for i, voice in enumerate(voices):
-                voice_info = {
-                    'id': voice.id,
-                    'name': voice.name,
-                    'languages': getattr(voice, 'languages', []),
-                    'gender': getattr(voice, 'gender', 'unknown'),
-                    'age': getattr(voice, 'age', 'unknown')
-                }
-                voice_list.append((i, voice_info))
-            
-            return voice_list
-            
+            engine = pyttsx3.init()
+            voices = engine.getProperty("voices")
+            result = [(i, {
+                "id": v.id, "name": v.name,
+                "languages": getattr(v, "languages", []),
+                "gender": getattr(v, "gender", "unknown"),
+            }) for i, v in enumerate(voices)]
+            engine.stop()
+            return result
         except Exception as e:
             self.logger.error(f"Ошибка получения голосов: {e}")
             return []
-    
-    def set_voice(self, voice_index: int):
-        """
-        Устанавливает голос по индексу
-        
-        Args:
-            voice_index: Индекс голоса из списка
-        """
-        if not self.engine:
-            return
-        
+
+    def test_speech(self, text: str = "Тестирование синтеза речи") -> bool:
         try:
-            voices = self.engine.getProperty('voices')
-            if 0 <= voice_index < len(voices):
-                self.engine.setProperty('voice', voices[voice_index].id)
-                self.logger.info(f"Голос изменен на: {voices[voice_index].name}")
-            else:
-                self.logger.error(f"Неверный индекс голоса: {voice_index}")
-                
-        except Exception as e:
-            self.logger.error(f"Ошибка установки голоса: {e}")
-    
-    def test_speech(self, text: str = "Тестирование синтеза речи"):
-        """Тестирует работу синтеза речи"""
-        try:
-            self.logger.info("Запуск теста TTS...")
             self.speak(text)
-            self.logger.info("Тест TTS завершен успешно")
             return True
         except Exception as e:
             self.logger.error(f"Тест TTS провален: {e}")
             return False
-    
+
     def save_to_file(self, text: str, filename: str):
-        """
-        Сохраняет речь в аудиофайл
-        
-        Args:
-            text: Текст для синтеза
-            filename: Имя файла для сохранения
-        """
-        if not self.engine:
-            self.logger.error("TTS движок не инициализирован")
-            return
-        
         try:
-            self.engine.save_to_file(text, filename)
-            self.engine.runAndWait()
-            self.logger.info(f"Речь сохранена в файл: {filename}")
+            engine = pyttsx3.init()
+            engine.save_to_file(text, filename)
+            engine.runAndWait()
+            engine.stop()
         except Exception as e:
-            self.logger.error(f"Ошибка сохранения в файл: {e}")
-    
+            self.logger.error(f"Ошибка сохранения: {e}")
+
     def cleanup(self):
-        """Очистка ресурсов"""
-        if self.engine:
-            try:
-                self.engine.stop()
-                self.logger.info("TTS движок остановлен")
-            except:
-                pass
+        pass  # нечего чистить — движок живёт только на время фразы

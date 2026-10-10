@@ -41,8 +41,8 @@ WAKE_WORD = "джарвис"
 
 # Настройки Ollama
 OLLAMA_BASE_URL = "http://localhost:11434"
-OLLAMA_MODEL = "qwen2.5vl:7b"  # Можно изменить на другую модель
-OLLAMA_TIMEOUT = 30  # Таймаут для запросов к Ollama в секундах
+OLLAMA_MODEL = "qwen2.5:0.5b"  # Можно изменить на другую модель
+OLLAMA_TIMEOUT = 60  # Таймаут для запросов к Ollama в секундах
 
 # Настройки TTS (Text-to-Speech)
 TTS_RATE = 200  # Скорость речи (150-300)

@@ -16,8 +16,8 @@ class SpeechRecognizer:
         self.logger = logging.getLogger(__name__)
 
         # Определяем, есть ли GPU
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
-        self.compute_type = "float16" if self.device == "cuda" else "int8"
+        self.device = "cuda"
+        self.compute_type = "float16"
 
         try:
             self.model = WhisperModel(

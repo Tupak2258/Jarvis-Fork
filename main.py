@@ -179,7 +179,7 @@ class JarvisAssistant:
         self.console.print("⌨️ Или нажмите 'q' + Enter для выхода\n", style="yellow")
         
         # Произнесение приветствия
-        self.tts.speak_async(f"Привет, {USER_NAME}! Я {ASSISTANT_NAME} и готов помочь вам.")
+        self.tts.speak(f"Привет, {USER_NAME}! Я {ASSISTANT_NAME} и готов помочь вам.")
     
     def _process_user_input(self, user_input: str) -> str:
         """Обрабатывает пользовательский ввод"""
@@ -291,7 +291,7 @@ class JarvisAssistant:
                 # Слушаем слово активации
                 if self.speech_recognizer.listen_for_wake_word():
                     self.console.print(f"\n🎤 {WAKE_WORD.title()} активирован!", style="bold green")
-                    self.tts.speak_async("Слушаю")
+                    self.tts.speak("Слушаю")
                     
                     # Слушаем команду
                     user_input = self.speech_recognizer.listen_for_command(timeout=10)
@@ -304,7 +304,7 @@ class JarvisAssistant:
                         self.tts.speak(answer)
                     else:
                         self.console.print("⚠️ Команда не распознана", style="yellow")
-                        self.tts.speak_async("Извините, я вас не понял")
+                        self.tts.speak("Извините, я вас не понял")
                 
                 # Небольшая пауза
                 time.sleep(0.1)
@@ -440,14 +440,9 @@ class JarvisAssistant:
         
         try:
             if voice_mode:
-                # Запуск голосового режима
-                voice_thread = threading.Thread(target=self._voice_interaction_loop, daemon=True)
-                voice_thread.start()
-                
-                # Мониторинг клавиатуры
-                self._keyboard_monitor()
-                
-                voice_thread.join(timeout=1)
+                keyboard_thread = threading.Thread(target=self._keyboard_monitor, daemon=True)
+                keyboard_thread.start()
+                self._voice_interaction_loop()   # главный поток
             else:
                 # Текстовый режим
                 self.console.print("📝 Текстовый режим активен", style="blue")
